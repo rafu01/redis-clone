@@ -6,6 +6,7 @@ import (
 	"net"
 	"os"
 	"strings"
+	"sync"
 )
 
 func main() {
@@ -84,6 +85,32 @@ func handleRESP(conn net.Conn, resp []string) {
 		}
 		response := fmt.Sprintf("$%d\r\n%s\r\n", len(resp[1]), resp[1])
 		conn.Write([]byte(response))
+	case "SET":
+		if len(resp) <= 2 {
+			conn.Write([]byte("-ERR wrong number of arguments for 'set' command\r\n"))
+			return
+		}
+		key := resp[1]
+		value := resp[2]
+		storeMutex.Lock()
+		store[key] = value
+		storeMutex.Unlock()
+		conn.Write([]byte("+OK\r\n"))
+	case "GET":
+		if len(resp) != 2 {
+			conn.Write([]byte("-ERR wrong number of arguments for 'get' command\r\n"))
+			return
+		}
+		key := resp[1]
+		storeMutex.RLock()
+		value, exists := store[key]
+		storeMutex.RUnlock()
+		if !exists {
+			conn.Write([]byte("$-1\r\n"))
+		} else {
+			response := fmt.Sprintf("$%d\r\n%s\r\n", len(value), value)
+			conn.Write([]byte(response))
+		}
 	case "PING":
 		if len(resp) == 1 {
 			conn.Write([]byte("+PONG\r\n"))
