@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"fmt"
 	"net"
 	"os"
@@ -22,5 +23,19 @@ func main() {
 			fmt.Println("Error accepting connection: ", err.Error())
 			os.Exit(1)
 		}
+		go handleConnection(conn)
+	}
+}
+
+func handleConnection(conn net.Conn) {
+	defer conn.Close()
+	reader := bufio.NewReader(conn)
+	for {
+		resp, err := readRESP(reader)
+		if err != nil {
+			fmt.Println("Error reading RESP:", err.Error())
+			return
+		}
+		handleRESP(conn, resp)
 	}
 }
