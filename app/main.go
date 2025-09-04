@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"strings"
 )
 
 func main() {
@@ -37,5 +38,57 @@ func handleConnection(conn net.Conn) {
 			return
 		}
 		handleRESP(conn, resp)
+	}
+}
+
+// *2\r\n$4\r\nECHO\r\n$3\r\nhey\r\n
+func readRESP(reader *bufio.Reader) ([]string, error) {
+	header, err := reader.ReadString('\n')
+	if err != nil || !strings.HasPrefix(header, "*") {
+		fmt.Println("Error reading header:", err.Error())
+		return nil, err
+	}
+	var count int
+	fmt.Sscanf(header, "*%d", &count)
+	args := make([]string, count)
+	for i := 0; i < count; i++ {
+		commandLength, err := reader.ReadString('\n')
+		if err != nil {
+			fmt.Println("Error reading command length:", err.Error())
+			return nil, err
+		}
+		var length int
+		fmt.Sscanf(commandLength, "$%d", &length)
+		data := make([]byte, length+2)
+		_, err = reader.Read(data)
+		fmt.Println("Read data:", string(data), "length:", length)
+		if err != nil {
+			fmt.Println("Error reading command argument:", err.Error())
+			return nil, err
+		}
+		args[i] = string(data[:length])
+	}
+	return args, nil
+}
+
+func handleRESP(conn net.Conn, resp []string) {
+	if len(resp) == 0 {
+		return
+	}
+	command := strings.ToUpper(resp[0])
+	switch command {
+	case "ECHO":
+		if len(resp) != 2 {
+			conn.Write([]byte("-ERR wrong number of arguments for 'echo' command\r\n"))
+			return
+		}
+		response := fmt.Sprintf("$%d\r\n%s\r\n", len(resp[1]), resp[1])
+		conn.Write([]byte(response))
+	case "PING":
+		if len(resp) == 1 {
+			conn.Write([]byte("+PONG\r\n"))
+		}
+	default:
+		conn.Write([]byte("-ERR unknown command\r\n"))
 	}
 }
