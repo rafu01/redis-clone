@@ -5,11 +5,20 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 )
 
+// (printf '*2\r\n$4\r\nECHO\r\n$3\r\nhey\r\n';) | nc localhost 6379
+// (printf '*5\r\n$3\r\nSET\r\n$5\r\ngrape\r\n$6\r\nbanana\r\n$2\r\npx\r\n$3\r\n100\r\n';) | nc localhost 6379
+var (
+	store      = make(map[string]ValueStore)
+	storeMutex sync.RWMutex
+)
+
 func main() {
+	// You can use print statements as follows for debugging, they'll be visible when running tests.
 	fmt.Println("Logs from your program will appear here!")
 
 	l, err := net.Listen("tcp", "0.0.0.0:6379")
@@ -62,7 +71,6 @@ func readRESP(reader *bufio.Reader) ([]string, error) {
 		fmt.Sscanf(commandLength, "$%d", &length)
 		data := make([]byte, length+2)
 		_, err = reader.Read(data)
-		fmt.Println("Read data:", string(data), "length:", length)
 		if err != nil {
 			fmt.Println("Error reading command argument:", err.Error())
 			return nil, err
@@ -93,7 +101,12 @@ func handleRESP(conn net.Conn, resp []string) {
 		key := resp[1]
 		value := resp[2]
 		storeMutex.Lock()
-		store[key] = value
+		vs := ValueStore{value: value, expiryTime: -1}
+		if len(resp) > 4 && strings.ToUpper(resp[3]) == "PX" {
+			durationInMilli, _ := strconv.ParseInt(resp[4], 10, 64)
+			setExpiryTime(&vs, durationInMilli)
+		}
+		store[key] = vs
 		storeMutex.Unlock()
 		conn.Write([]byte("+OK\r\n"))
 	case "GET":
@@ -103,12 +116,12 @@ func handleRESP(conn net.Conn, resp []string) {
 		}
 		key := resp[1]
 		storeMutex.RLock()
-		value, exists := store[key]
+		valueObj, exists := store[key]
 		storeMutex.RUnlock()
-		if !exists {
+		if !exists || isExpired(&valueObj) {
 			conn.Write([]byte("$-1\r\n"))
 		} else {
-			response := fmt.Sprintf("$%d\r\n%s\r\n", len(value), value)
+			response := fmt.Sprintf("$%d\r\n%s\r\n", len(valueObj.value), valueObj.value)
 			conn.Write([]byte(response))
 		}
 	case "PING":
