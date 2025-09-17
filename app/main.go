@@ -14,6 +14,7 @@ import (
 // (printf '*5\r\n$3\r\nSET\r\n$5\r\ngrape\r\n$6\r\nbanana\r\n$2\r\npx\r\n$3\r\n100\r\n';) | nc localhost 6379
 var (
 	store      = make(map[string]ValueStore)
+	storeList  = make(map[string][]ValueStore)
 	storeMutex sync.RWMutex
 )
 
@@ -86,6 +87,18 @@ func handleRESP(conn net.Conn, resp []string) {
 	}
 	command := strings.ToUpper(resp[0])
 	switch command {
+	case "RPUSH":
+		if len(resp) < 3 {
+			conn.Write([]byte("-ERR wrong number of arguments for 'rpush' command\r\n"))
+			return
+		}
+		key := resp[1]
+		value := resp[2]
+		storeMutex.Lock()
+		storeList[key] = append(storeList[key], ValueStore{value: value, expiryTime: -1})
+		length := len(storeList[key])
+		storeMutex.Unlock()
+		conn.Write([]byte(fmt.Sprintf(":%d\r\n", length)))
 	case "ECHO":
 		if len(resp) != 2 {
 			conn.Write([]byte("-ERR wrong number of arguments for 'echo' command\r\n"))
